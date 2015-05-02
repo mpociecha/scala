@@ -14,20 +14,31 @@ package scalasig
 import scala.language.postfixOps
 import scala.language.implicitConversions
 
-import ClassFileParser.{ ConstValueIndex, Annotation }
+import ClassFileParser._
 import scala.reflect.internal.pickling.ByteCodecs
 
 object ScalaSigParser {
-  import Main.{ SCALA_SIG, SCALA_SIG_ANNOTATION, BYTES_VALUE }
+  import Main.{ BYTES_VALUE, SCALA_LONG_SIG_ANNOTATION, SCALA_SIG, SCALA_SIG_ANNOTATION }
 
   def scalaSigFromAnnotation(classFile: ClassFile): Option[ScalaSig] = {
     import classFile._
 
-    classFile.annotation(SCALA_SIG_ANNOTATION) map {
+    def getBytes(bytesElem: AnnotationElement): Array[Byte] = bytesElem.elementValue match {
+      case ConstValueIndex(index) =>
+        constantWrapped(index).asInstanceOf[StringBytesPair].bytes
+      case ArrayValue(signatureParts) =>
+        mergedLongSignatureBytes(signatureParts)
+    }
+
+    def mergedLongSignatureBytes(signatureParts: Seq[ElementValue]): Array[Byte] = signatureParts.flatMap {
+      case ConstValueIndex(index) => constantWrapped(index).asInstanceOf[StringBytesPair].bytes
+    }(collection.breakOut)
+
+    classFile.annotation(SCALA_SIG_ANNOTATION)
+      .orElse(classFile.annotation(SCALA_LONG_SIG_ANNOTATION)).map {
       case Annotation(_, elements) =>
         val bytesElem = elements.find(elem => constant(elem.elementNameIndex) == BYTES_VALUE).get
-        val bytes = ((bytesElem.elementValue match {case ConstValueIndex(index) => constantWrapped(index)})
-                .asInstanceOf[StringBytesPair].bytes)
+        val bytes = getBytes(bytesElem)
         val length = ByteCodecs.decode(bytes)
 
         ScalaSigAttributeParsers.parse(ByteCode(bytes.take(length)))
